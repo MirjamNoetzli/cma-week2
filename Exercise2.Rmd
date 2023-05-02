@@ -5,13 +5,167 @@ date: "2023-04-28"
 ---
 
 # Exercise 2
-## Task 1: Import your data
+Load Libraries
 ```{r}
 library("readr") 
 library("sf") 
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(tmap)
+```
 
+### Task 1: Import Data
+```{r}
 wildschwein_BE <- read_delim("wildschwein_BE_2056.csv", ",")
 
 wildschwein_BE <- st_as_sf(wildschwein_BE, coords = c("E", "N"), crs = 2056, remove = FALSE)
+```
+
+## Task 2: Getting an overview
+```{r}
+# Group individual wild boars according to their TierID
+wildschwein_BE$TierName  |> unique() # 3 individuals were tracked
+
+# Plot to see when the animals were tracked
+ggplot(wildschwein_BE, aes(DatetimeUTC, TierName))+
+  geom_point() # the three animals were tracked in approximately the same time frame
+
+# Calculate timelag between the steps
+wildschwein_BE <- wildschwein_BE |> 
+  group_by(TierName) |> 
+  mutate(diff_s = difftime(lead(DatetimeUTC), DatetimeUTC) |> as.integer())
+
+# Plot of the tracked individuals
+ggplot(wildschwein_BE, aes(diff_s/60))+
+  geom_histogram(binwidth = 1)+
+  lims(x = c(0, 5000/60))+
+  scale_y_log10
+
+# Seperate data for each day and plot it
+wildschwein_BE |> 
+  filter(DatetimeUTC < "2014-08-24") |> 
+  ggplot(aes(DatetimeUTC, diff_s, colour = TierName))+
+  geom_point()+
+  geom_line()
+```
+
+## Task 3: Deriving movement parameters I: Speed
+```{r}
+N1 <- 1204752
+N2 <- 1204863
+E1 <- 2570409
+E2 <- 2570402
+
+# Formula to calculate the euclidean distance (whereas E1, N1 refer to the current location. E2, N2 refer to the consecutive location)
+distance <- sqrt((E1 - E2)^2 + (N1 - N2)^2)
+
+# Calculates the euclidean distance between each step (creates NA for last step per individual)
+wildschwein_BE <- wildschwein_BE |> 
+  group_by(TierName) |> 
+  mutate(steplength_m=sqrt((E-lead(E))^2+(N-lead(N))^2))
+
+# Calculates the animals’ speed between consecutive locations
+wildschwein_BE <- wildschwein_BE |> mutate(speed_ms = steplength_m/diff_s)
+
+# Visualize with histogram
+hist(wildschwein_BE$speed_ms, breaks = 100) # skewed data
+
+# log transform
+hist(log10(wildschwein_BE$speed_ms), breaks = 100) # bell-shaped curve
+```
+
+## Task 4: Cross-scale movement analysis
+```{r}
+# Import data
+caro <- read_delim("caro60.csv", delim = ",")
+
+st_as_sf(caro, coords = c("E", "N"), crs = 2056, remove = FALSE)
+
+# manually reduce the granularity of the sampling interval by selecting every 3rd, 6th and 9th position
+caro3 <- caro[seq(1, nrow(caro), by=3),]
+caro6 <- caro[seq(1, nrow(caro), by=6),]
+caro9 <- caro[seq(1, nrow(caro), by=9),]
+
+nrow(caro) # 200 rows
+nrow(caro3) # 67 rows
+nrow(caro6) # 34 rows
+nrow(caro9) # 23 rows
+
+# calculate timelag
+caro <- caro |> 
+  mutate(diff_s = difftime(lead(DatetimeUTC), DatetimeUTC, units = "sec") |> as.integer())
+
+caro3 <- caro3 |> 
+  mutate(diff_s = difftime(lead(DatetimeUTC), DatetimeUTC, units = "sec") |> as.integer())
+
+caro6 <- caro6 |> 
+  mutate(diff_s = difftime(lead(DatetimeUTC), DatetimeUTC, units = "sec") |> as.integer())
+
+caro9 <- caro9 |> 
+  mutate(diff_s = difftime(lead(DatetimeUTC), DatetimeUTC, units = "sec") |> as.integer())
+
+# Calculate steplength
+caro <- caro |> 
+  mutate(steplength_m=sqrt((E-lead(E))^2+(N-lead(N))^2))
+
+caro3 <- caro3 |> 
+  mutate(steplength_m=sqrt((E-lead(E))^2+(N-lead(N))^2))
+
+caro6 <- caro6 |> 
+  mutate(steplength_m=sqrt((E-lead(E))^2+(N-lead(N))^2))
+
+caro9 <- caro9 |> 
+  mutate(steplength_m=sqrt((E-lead(E))^2+(N-lead(N))^2))
+
+# Calculate speed between consecutive locations
+caro <- caro |> mutate(speed_ms = steplength_m/diff_s)
+
+caro3 <- caro3 |> mutate(speed_ms = steplength_m/diff_s)
+
+caro6 <- caro6 |> mutate(speed_ms = steplength_m/diff_s)
+
+caro9 <- caro9 |> mutate(speed_ms = steplength_m/diff_s)
+
+# Visualize with plot comparing speed at the different time intervals
+ggplot()+
+  labs(x = "Time", y = "Speed (m/s)") +
+  ggtitle(paste("Comparing derived speed at different sampling intervals"))+
+  geom_line(data=caro, aes(DatetimeUTC,speed_ms, color="caro"))+
+  geom_line(data=caro3, aes(DatetimeUTC,speed_ms, color= "caro3"))+
+  geom_line(data=caro6, aes(DatetimeUTC,speed_ms, color="caro6"))+
+  geom_line(data=caro9, aes(DatetimeUTC,speed_ms, color="caro9"))+
+  scale_color_manual(values = c("red","darkgreen", "navy", "magenta"))+
+  theme_classic()
+
+# Plot comparing original with 3 minute trajectory
+ggplot()+
+  labs(x = "E", y = "N") +
+  ggtitle(paste("Comparing original- with 3 minutes-resampled data"))+
+  geom_path(data = caro3, aes(E,N),color = 'blue') + 
+  geom_path(data = caro, aes(E,N),color = 'red')
+
+# Plot comparing original with 6 minute trajectory
+ggplot()+
+  labs(x = "E", y = "N") +
+  ggtitle(paste("Comparing original- with 6 minutes-resampled data"))+
+  geom_path(data = caro6, aes(E,N),color = 'blue') + 
+  geom_path(data = caro, aes(E,N),color = 'red')
+
+# Plot comparing original with 9 minute trajectory
+ggplot()+
+  labs(x = "E", y = "N") +
+  ggtitle(paste("Comparing original- with 9 minutes-resampled data"))+
+  geom_path(data = caro9, aes(E,N),color = 'blue') + 
+  geom_path(data = caro, aes(E,N),color = 'red')
+```
+
+## Task 7: Explore movement data
+```{r}
+posmo <- read_delim("data/posmo_data.csv", delim = ",")
+posmo <- st_as_sf(posmo, coords = c("lon_x", "lat_y"), crs = 2056, remove = FALSE)
+
+ggplot()+
+  geom_path(data = posmo, aes(lon_x,lat_y),color = 'blue') 
 ```
 
