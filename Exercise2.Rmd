@@ -1,0 +1,17 @@
+---
+title: "Exercise 2"
+output: html_document
+date: "2023-04-28"
+---
+
+# Exercise 2
+## Task 1: Import your data
+```{r}
+library("readr") 
+library("sf") 
+
+wildschwein_BE <- read_delim("wildschwein_BE_2056.csv", ",")
+
+wildschwein_BE <- st_as_sf(wildschwein_BE, coords = c("E", "N"), crs = 2056, remove = FALSE)
+```
+
